@@ -11,6 +11,8 @@ Some Projects/References You May Also Enjoy
 
 References:
 
+http://blogs.technet.com/b/vishalagarwal/archive/2009/08/22/generating-a-certificate-self-signed-using-powershell-and-certenroll-interfaces.aspx
+
 http://www.css-security.com/blog/creating-a-self-signed-ssl-certificate-using-powershell/
 
 http://www.codeproject.com/Articles/93301/Implementing-a-Multithreaded-HTTP-HTTPS-Debugging
