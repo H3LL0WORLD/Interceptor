@@ -60,11 +60,16 @@ If Tamper is enabled, this will search for a string to be replace. To be used wi
 
 If Tamper is enabled, this will be the string that replaces the string identified by the 'SearchString' parameter
 
+.PARAMETER Domains
+
+Accepts a list of domains to create Trusted root Certs for at the beginning of script run.List should be delimited with a comma ',' .
+
 .EXAMPLE
 
 Interceptor.ps1 -ProxyServer localhost -ProxyPort 8888 
 Interceptor.ps1 -Tamper 
 Interceptor.ps1 -HostCA
+Interceptor.ps1 -Domains "www.fakedomain1.com,www.fakedomain2.com"
 
 .NOTES
 This script attempts to make SSL MITM accessible, by being a small compact proof of concept script.  
