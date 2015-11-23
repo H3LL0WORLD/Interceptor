@@ -247,7 +247,7 @@ function Invoke-CreateCertificate([string] $certSubject, [bool] $isCA)
 	$issuerdn.Encode("CN=" + $issuer, $dn.X500NameFlags.X500NameFlags.XCN_CERT_NAME_STR_NONE)
 	# Create a new Private Key
 	$key = new-object -com "X509Enrollment.CX509PrivateKey"
-	$key.ProviderName = "Microsoft Enhanced Cryptographic Provider v1.0"
+	$key.ProviderName =  "Microsoft Enhanced RSA and AES Cryptographic Provider" #"Microsoft Enhanced Cryptographic Provider v1.0"	
 	# Set CAcert to 1 to be used for Signature
 	if($isCA)
 		{
@@ -257,7 +257,7 @@ function Invoke-CreateCertificate([string] $certSubject, [bool] $isCA)
 		{
 			$key.KeySpec = 1
 		}
-	$key.Length = 1024
+	$key.Length = 2048
 	$key.MachineContext = 1
 	$key.Create() 
 	 
@@ -275,6 +275,12 @@ function Invoke-CreateCertificate([string] $certSubject, [bool] $isCA)
 	$cert.Issuer = $issuerdn
 	$cert.NotBefore = (get-date).AddDays(-1) #Backup One day to Avoid Timing Issues
 	$cert.NotAfter = $cert.NotBefore.AddDays(90) #Arbitrary... Change to persist longer...
+	#Use Sha256
+	$hashAlgorithmObject = New-Object -ComObject X509Enrollment.CObjectId
+	$hashAlgorithmObject.InitializeFromAlgorithmName(1,0,0,"SHA256")
+	$cert.HashAlgorithm = $hashAlgorithmObject
+	#Good Reference Here http://www.css-security.com/blog/creating-a-self-signed-ssl-certificate-using-powershell/
+	
 	$cert.X509Extensions.Add($ekuext)
 	if ($isCA)
 	{
@@ -563,7 +569,7 @@ function Receive-ClientHttpRequest([System.Net.Sockets.TcpClient] $client, [Syst
 				$sslcertfake =  Invoke-CreateCertificate $domainParse[0] $false
 			}
 			
-			$sslStream.AuthenticateAsServer($sslcertfake, $false, [System.Security.Authentication.SslProtocols]::Tls, $false)
+			$sslStream.AuthenticateAsServer($sslcertfake, $false, [System.Security.Authentication.SslProtocols]::Tls12, $false)
 		
 			$sslbyteArray = new-object System.Byte[] 32768
 			[void][byte[]] $sslbyteClientRequest
@@ -763,10 +769,3 @@ function Main()
 }
 
 Main
-
-# TODO
-
-# Pre-stage certs for specific domain attack (creating them dynamically is 'expensive')
-# Find a way to encode certs so they don't store in registry
-# Maybe switch 'httpwebrequest' at a socket level instead
-# Perhaps find alternative for BlockCopy in 'Receiveserverhttpresponse"
